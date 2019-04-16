@@ -57,6 +57,7 @@
     <Compile Include="FormTerminal.Designer.cs">
       <DependentUpon>FormTerminal.cs</DependentUpon>
     </Compile>
+    <Compile Include="COBS.cs" />
     <Compile Include="Oscilloscope\Oscilloscope.cs" />
     <Compile Include="SampleCounter.cs" />
     <Compile Include="Program.cs" />

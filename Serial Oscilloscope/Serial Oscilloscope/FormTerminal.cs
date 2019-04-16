@@ -10,6 +10,8 @@ using System.Reflection;
 using System.IO.Ports;
 using System.Text.RegularExpressions;
 using System.Globalization;
+using Consistent_Overhead_Byte_Stuffing;
+using System.Diagnostics;
 
 namespace Serial_Oscilloscope
 {
@@ -70,12 +72,13 @@ namespace Serial_Oscilloscope
         /// <summary>
         /// Raw hex mode
         /// </summary>
-        private bool hexMode = false;
+        private bool hexMode = true;
+
+        List<byte> payload = new List<byte>();
 
         private byte[] hexModeArray = new byte[128];
 
-        private int hexModeArrayIndex = 0;
-
+ 
         #endregion
 
         /// <summary>
@@ -475,19 +478,36 @@ namespace Serial_Oscilloscope
                     // look at this non-dry hack :3
                     if (hexMode == true)
                     {
-                        if (b == '\r')
-                        {
+                        if (b == 0)
+                        {                    
                             try
                             {
-                                int first = (hexModeArray[0] << 8) | hexModeArray[1];
-                                int second = (hexModeArray[3] << 8) | hexModeArray[4];
-                                int third = (hexModeArray[6] << 8) | hexModeArray[7];
-                                int fourth = (hexModeArray[9] << 8) | hexModeArray[10];
+                                Debug.WriteLine("Start - ");
 
-                                string final = String.Format("{0:X},{1:X},{2:X},{3:X}↵", first, second, third, fourth);
-                                hexModeArrayIndex = 0;
+                                payload.Add(b);
+                                byte[] pload = payload.ToArray();
+                                byte[] output = new byte[16];
+                                int size = COBS.cobs_decode(ref pload, pload.Length, ref output);
+                                // 0, 1, -1, -32768 >> Actual Data                                
+                                // 01 01 01 05 01 FF FF 80 01 00 >> Raw COBS encoded over SUB
+                                // 0 0 0 1 ff ff 80 00  >> After COBS decode
+                              
+                                short first = (short)((output[0] << 8) | output[1]);
+                                short second = (short)((output[2] << 8) | output[3]);
+                                short third = (short)((output[4] << 8) | output[5]);
+                                short fourth = (short)((output[6] << 8) | output[7]);
+                                string final = String.Format(first.ToString()+ ", " + second + ", " + third + ", " + fourth + "↵" + Environment.NewLine);
 
+                                //Debug.WriteLine("Decoded string - " + final);
+                                asciiBuf += final;
+                                Debug.WriteLine("Decoded string - " + final);
 
+                                // Extract CSVs and parse to Oscilloscope
+                                if (asciiBuf.Length > 128)
+                                {
+                                    asciiBuf = "";  // prevent memory leak
+                                }
+                                
                                 // Split string to comma separated variables (ignore non numerical characters)
                                 string[] csvs = (new Regex(@"[^0-9\-,.]")).Replace(final, "").Split(',');
 
@@ -497,6 +517,7 @@ namespace Serial_Oscilloscope
                                 {
                                     if (csv != "" && channelIndex < 9)
                                     {
+                                        Debug.WriteLine("Adding Ch " + csv);
                                         channels[channelIndex++] = float.Parse(csv, CultureInfo.InvariantCulture);
                                     }
                                 }
@@ -517,12 +538,13 @@ namespace Serial_Oscilloscope
                                 }
 
                                 // Reset buffer
-                                final = "";
+                                asciiBuf = "";
+                                Debug.WriteLine("End - ");
                             }
-                            catch { hexModeArrayIndex = 0; }
+                            catch { Debug.WriteLine("Exception caught - "); payload.Clear(); }
                         } else
                         {
-                            hexModeArray[hexModeArrayIndex++] = b;
+                            payload.Add(b);
                         }
                     } else
                     {
@@ -556,6 +578,8 @@ namespace Serial_Oscilloscope
                             {
                                 if (csv != "" && channelIndex < 9)
                                 {
+                                    Debug.WriteLine("Adding Ch" + csv);
+
                                     channels[channelIndex++] = float.Parse(csv, CultureInfo.InvariantCulture);
                                 }
                             }
