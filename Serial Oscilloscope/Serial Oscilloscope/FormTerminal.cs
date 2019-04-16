@@ -67,6 +67,15 @@ namespace Serial_Oscilloscope
         /// </summary>
         private CsvFileWriter csvFileWriter = null;
 
+        /// <summary>
+        /// Raw hex mode
+        /// </summary>
+        private bool hexMode = false;
+
+        private byte[] hexModeArray = new byte[128];
+
+        private int hexModeArrayIndex = 0;
+
         #endregion
 
         /// <summary>
@@ -463,67 +472,151 @@ namespace Serial_Oscilloscope
                 // Process each byte
                 foreach (byte b in readBuffer)
                 {
-                    // Parse character to textBoxBuffer
-                    if ((b < 0x20 || b > 0x7F) && b != '\r')    // replace non-printable characters with '.'
+                    // look at this non-dry hack :3
+                    if (hexMode == true)
                     {
-                        textBoxBuffer.Put(".");
-                    }
-                    else if (b == '\r')     // replace carriage return with '↵' and valid new line
-                    {
-                        textBoxBuffer.Put("↵" + Environment.NewLine);
-                    }
-                    else
-                    {
-                        textBoxBuffer.Put(((char)b).ToString());
-                    }
-
-                    // Extract CSVs and parse to Oscilloscope
-                    if (asciiBuf.Length > 128)
-                    {
-                        asciiBuf = "";  // prevent memory leak
-                    }
-                    if ((char)b == '\r')
-                    {
-                        // Split string to comma separated variables (ignore non numerical characters)
-                        string[] csvs = (new Regex(@"[^0-9\-,.]")).Replace(asciiBuf, "").Split(',');
-
-                        // Extract each CSV as oscilloscope channel 
-                        int channelIndex = 0;
-                        foreach (string csv in csvs)
+                        if (b == '\r')
                         {
-                            if (csv != "" && channelIndex < 9)
+                            try
                             {
-                                channels[channelIndex++] = float.Parse(csv, CultureInfo.InvariantCulture);
+                                int first = (hexModeArray[0] << 8) | hexModeArray[1];
+                                int second = (hexModeArray[3] << 8) | hexModeArray[4];
+                                int third = (hexModeArray[6] << 8) | hexModeArray[7];
+                                int fourth = (hexModeArray[9] << 8) | hexModeArray[10];
+
+                                string final = String.Format("{0:X},{1:X},{2:X},{3:X}↵", first, second, third, fourth);
+                                hexModeArrayIndex = 0;
+
+
+                                // Split string to comma separated variables (ignore non numerical characters)
+                                string[] csvs = (new Regex(@"[^0-9\-,.]")).Replace(final, "").Split(',');
+
+                                // Extract each CSV as oscilloscope channel 
+                                int channelIndex = 0;
+                                foreach (string csv in csvs)
+                                {
+                                    if (csv != "" && channelIndex < 9)
+                                    {
+                                        channels[channelIndex++] = float.Parse(csv, CultureInfo.InvariantCulture);
+                                    }
+                                }
+
+                                // Update oscilloscopes if channel values changed
+                                if (channelIndex > 0)
+                                {
+                                    oscilloscope123.AddScopeData(channels[0], channels[1], channels[2]);
+                                    oscilloscope456.AddScopeData(channels[3], channels[4], channels[5]);
+                                    oscilloscope789.AddScopeData(channels[6], channels[7], channels[8]);
+                                    sampleCounter.Increment();
+                                }
+
+                                // Write to file if enabled
+                                if (csvFileWriter != null)
+                                {
+                                    csvFileWriter.WriteCSVline(channels);
+                                }
+
+                                // Reset buffer
+                                final = "";
                             }
-                        }
-
-                        // Update oscilloscopes if channel values changed
-                        if (channelIndex > 0)
+                            catch { hexModeArrayIndex = 0; }
+                        } else
                         {
-                            oscilloscope123.AddScopeData(channels[0], channels[1], channels[2]);
-                            oscilloscope456.AddScopeData(channels[3], channels[4], channels[5]);
-                            oscilloscope789.AddScopeData(channels[6], channels[7], channels[8]);
-                            sampleCounter.Increment();
+                            hexModeArray[hexModeArrayIndex++] = b;
                         }
-
-                        // Write to file if enabled
-                        if (csvFileWriter != null)
-                        {
-                            csvFileWriter.WriteCSVline(channels);
-                        }
-
-                        // Reset buffer
-                        asciiBuf = "";
-                    }
-                    else
+                    } else
                     {
-                        asciiBuf += (char)b;
+                        // Parse character to textBoxBuffer
+                        if ((b < 0x20 || b > 0x7F) && b != '\r')    // replace non-printable characters with '.'
+                        {
+                            textBoxBuffer.Put(".");
+                        }
+                        else if (b == '\r')     // replace carriage return with '↵' and valid new line
+                        {
+                            textBoxBuffer.Put("↵" + Environment.NewLine);
+                        }
+                        else
+                        {
+                            textBoxBuffer.Put(((char)b).ToString());
+                        }
+
+                        // Extract CSVs and parse to Oscilloscope
+                        if (asciiBuf.Length > 128)
+                        {
+                            asciiBuf = "";  // prevent memory leak
+                        }
+                        if ((char)b == '\r')
+                        {
+                            // Split string to comma separated variables (ignore non numerical characters)
+                            string[] csvs = (new Regex(@"[^0-9\-,.]")).Replace(asciiBuf, "").Split(',');
+
+                            // Extract each CSV as oscilloscope channel 
+                            int channelIndex = 0;
+                            foreach (string csv in csvs)
+                            {
+                                if (csv != "" && channelIndex < 9)
+                                {
+                                    channels[channelIndex++] = float.Parse(csv, CultureInfo.InvariantCulture);
+                                }
+                            }
+
+                            // Update oscilloscopes if channel values changed
+                            if (channelIndex > 0)
+                            {
+                                oscilloscope123.AddScopeData(channels[0], channels[1], channels[2]);
+                                oscilloscope456.AddScopeData(channels[3], channels[4], channels[5]);
+                                oscilloscope789.AddScopeData(channels[6], channels[7], channels[8]);
+                                sampleCounter.Increment();
+                            }
+
+                            // Write to file if enabled
+                            if (csvFileWriter != null)
+                            {
+                                csvFileWriter.WriteCSVline(channels);
+                            }
+
+                            // Reset buffer
+                            asciiBuf = "";
+                        }
+                        else
+                        {
+                            asciiBuf += (char)b;
+                        }
                     }
+                    
                 }
+                
             }
             catch { }
         }
 
         #endregion
+
+        private void textBox_TextChanged(object sender, EventArgs e)
+        {
+
+        }
+
+        private void toolStripMenuItemEnabled_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void blueWhiteHexReadToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            
+        }
+
+        private void blueWhiteHexReadToolStripMenuItem_CheckStateChanged(object sender, EventArgs e)
+        {
+            if (blueWhiteHexReadToolStripMenuItem.Checked)
+            {
+                hexMode = true;
+            }
+            else
+            {
+                hexMode = false;
+            }
+        }
     }
 }
